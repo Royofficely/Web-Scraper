@@ -90,6 +90,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-Created with ❤️ by [Your Name/Organization]
+Created with ❤️ by [Roy Nativ/Officely AI]
 
 For any questions or support, please open an issue on the GitHub repository.
