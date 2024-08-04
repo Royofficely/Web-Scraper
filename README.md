@@ -21,12 +21,12 @@ A powerful, recursive URL-smart web scraping tool designed to efficiently collec
 1. Clone this repository:
    ```
    git clone https://github.com/Royofficely/Web-Scraper.git
-   cd officely-web-scraper
+   cd Web-Scraper
    ```
 
 2. Install the scraper and its dependencies:
    ```
-   officely-scraper web scraper install
+   pip install .
    ```
 
    This command will install the package, its dependencies, and create the initial configuration.
