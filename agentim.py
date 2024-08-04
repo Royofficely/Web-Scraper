@@ -5,15 +5,12 @@ import subprocess
 
 def install_dependencies():
     print("Installing Officely Web Scraper and its dependencies...")
-    
-    # Install the package itself
     subprocess.check_call([sys.executable, "-m", "pip", "install", "."])
-    
-    # Install other dependencies if requirements.txt exists
     if os.path.exists("requirements.txt"):
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
     else:
         print("requirements.txt not found. Skipping additional dependencies.")
+    print("Installation complete. You can now run the scraper using 'officely-scraper web scraper run'.")
 
 def create_config():
     if not os.path.exists("config.py"):
@@ -33,14 +30,15 @@ def create_config():
 def run_scraper():
     if os.path.exists("scan.py"):
         print("Running the web scraper...")
-        subprocess.call([sys.executable, "scan.py"])
+        from scan import run_scraper
+        run_scraper()
     else:
         print("scan.py not found. Please ensure it exists in the current directory.")
         sys.exit(1)
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: officely-scraper web scraper [install|run]")
+    if len(sys.argv) != 2:
+        print("Usage: python agentim.py [install|run]")
         sys.exit(1)
 
     command = sys.argv[1]
@@ -48,12 +46,11 @@ def main():
     if command == "install":
         install_dependencies()
         create_config()
-        print("Installation complete. You can now run the scraper using 'officely-scraper web scraper run'.")
     elif command == "run":
         run_scraper()
     else:
         print(f"Unknown command: {command}")
-        print("Usage: officely-scraper web scraper [install|run]")
+        print("Usage: python agentim.py [install|run]")
         sys.exit(1)
 
 if __name__ == "__main__":
