@@ -20,7 +20,7 @@ A powerful, recursive URL-smart web scraping tool designed to efficiently collec
 
 1. Clone this repository:
    ```
-   git clone https://github.com/yourusername/officely-web-scraper.git
+   git clone https://github.com/Royofficely/Web-Scraper.git
    cd officely-web-scraper
    ```
 
