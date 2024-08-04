@@ -1,0 +1,33 @@
+#!/bin/bash
+
+# Get the project directory (assuming officely-scraper is run from the project directory)
+PROJECT_DIR="$(pwd)"
+
+# Set the path to agentim.py
+AGENTIM_PY="$PROJECT_DIR/agentim.py"
+
+# Function to check if the Python script exists
+check_script() {
+    if [[ ! -f "$AGENTIM_PY" ]]; then
+        echo "Error: Python script 'agentim.py' not found in $PROJECT_DIR."
+        exit 2
+    fi
+}
+
+# Function to run the Python script with the given command
+run_agentim() {
+    local command="$1"
+    check_script
+    echo "Executing: python3 $AGENTIM_PY $command"
+    python3 "$AGENTIM_PY" "$command"
+}
+
+# Main logic
+if [[ "$1 $2 $3" == "web scraper install" ]]; then
+    run_agentim "install"
+elif [[ "$1 $2 $3" == "web scraper run" ]]; then
+    run_agentim "run"
+else
+    echo "Usage: officely-scraper web scraper [install|run]"
+    exit 1
+fi
