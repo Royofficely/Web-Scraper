@@ -56,7 +56,7 @@ config = {
     "exclude_keywords": None,  # List of keywords to exclude from URLs
     "max_depth": 1,  # Maximum recursion depth (None for unlimited)
     "target_div": None,  # Specific div class to target (None for whole page)
-    "start_with": None,  # filter by "start with" full url for example https://example.com/blog
+    "start_with": None,  # filter by "start with" the url. for example: https://example.com/blog
 }
 ```
 
