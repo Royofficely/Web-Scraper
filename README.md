@@ -94,6 +94,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-Created with ❤️ by [Roy Nativ/Officely AI]
+Created with ❤️ by Roy Nativ/Officely AI
 
 For any questions or support, please open an issue on the GitHub repository.
