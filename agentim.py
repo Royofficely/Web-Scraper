@@ -1,7 +1,8 @@
-#!/usr/bin/env python3
 import os
 import sys
 import subprocess
+from importlib import reload
+import importlib.util
 
 def install_dependencies():
     print("Installing Officely Web Scraper and its dependencies...")
@@ -10,14 +11,14 @@ def install_dependencies():
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
     else:
         print("requirements.txt not found. Skipping additional dependencies.")
-    print("Installation complete. You can now run the scraper using 'officely-scraper web scraper run'.")
+    print("Installation complete. You can now run the scraper using 'python agentim.py run'.")
 
 def create_config():
     if not os.path.exists("config.py"):
         print("Creating default config.py...")
         with open("config.py", "w") as f:
             f.write('''config = {
-    "domain": "https://help.officely.ai",
+    "domain": "https://www.lusha.com",
     "include_keywords": None,
     "exclude_keywords": None,
     "max_depth": 1,
@@ -27,13 +28,26 @@ def create_config():
     else:
         print("config.py already exists.")
 
+def load_config():
+    spec = importlib.util.spec_from_file_location("config", "./config.py")
+    config_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config_module)
+    return config_module
+
 def run_scraper():
-    if os.path.exists("scan.py"):
+    if os.path.exists("officely_web_scraper/scan.py"):
         print("Running the web scraper...")
-        from scan import run_scraper
-        run_scraper()
+        try:
+            config = load_config()
+            from officely_web_scraper import scan
+            reload(scan)
+            print(f"Using domain: {config.config['domain']}")  # Debug output
+            scan.run_scraper(config)
+        except Exception as e:
+            print(f"An error occurred while running the scraper: {e}")
+            sys.exit(1)
     else:
-        print("scan.py not found. Please ensure it exists in the current directory.")
+        print("scan.py not found. Please ensure it exists in the officely_web_scraper directory.")
         sys.exit(1)
 
 def main():
