@@ -8,7 +8,7 @@ A powerful, recursive URL-smart web scraping tool designed to efficiently collec
 - 🎯 **Configurable Depth**: Set the maximum depth for URL recursion to control the scope of your scraping.
 - 🔍 **Smart URL Filtering**: Include or exclude URLs based on keywords or prefixes.
 - 📁 **Organized Output**: Automatically creates a directory structure based on the domain being scraped.
-- 🛡️ **Respectful Scraping**: Implements user-agent rotation and retry logic to respect website policies.
+- 🛡️ **Respectful Scraping**: Implements user-agent rotation and retry logic with exponential backoff to respect website policies.
 - ⚙️ **Highly Configurable**: Easy-to-use configuration file for customizing scraping behavior.
 
 ## Prerequisites
@@ -50,7 +50,7 @@ python agentim.py run
 
 ## Configuration
 
-The scraper's behavior can be customized by editing the `config.py` file in the root directory:
+The scraper's behavior can be customized by editing the `config.py` file in the `officely_web_scraper` directory:
 
 ```python
 config = {
@@ -78,6 +78,7 @@ If you encounter any issues:
 3. Verify that you have the necessary permissions to install packages and write to the directory.
 4. Make sure your virtual environment is activated if you're using one.
 5. If you encounter 503 errors or other connection issues, the scraper will automatically retry with exponential backoff.
+6. Check the console output for any error messages or debugging information.
 
 ## Development
 
@@ -86,6 +87,23 @@ To set up the project for development:
 1. Follow the installation steps above, using `python agentim.py install` for installation.
 2. Make your changes to the code.
 3. Run tests (if available) to ensure functionality.
+
+## Project Structure
+
+```
+.
+├── LICENSE
+├── README.md
+├── agentim.py
+├── install.sh
+├── officely-scraper
+├── officely_web_scraper
+│   ├── __init__.py
+│   ├── config.py
+│   └── scan.py
+├── requirements.txt
+└── setup.py
+```
 
 ## Contributing
 
