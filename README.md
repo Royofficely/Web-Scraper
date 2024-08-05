@@ -24,9 +24,15 @@ A powerful, recursive URL-smart web scraping tool designed to efficiently collec
    cd Web-Scraper
    ```
 
-2. Install the scraper and its dependencies:
+2. (Optional but recommended) Create and activate a virtual environment:
    ```
-   pip install .
+   python -m venv venv
+   source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+   ```
+
+3. Install the scraper and its dependencies:
+   ```
+   pip install -e .
    ```
 
    This command will install the package, its dependencies, and create the initial configuration.
@@ -35,14 +41,13 @@ A powerful, recursive URL-smart web scraping tool designed to efficiently collec
 
 After installation, you can use the scraper from any directory:
 
-1. Run the scraper:
-   ```
-   officely-scraper web scraper run
-   ```
+```
+officely-scraper web scraper run
+```
 
 ## Configuration
 
-The scraper's behavior can be customized by editing the `config.py` file in the project directory:
+The scraper's behavior can be customized by editing the `officely_web_scraper/config.py` file:
 
 ```python
 config = {
@@ -64,21 +69,20 @@ The scraped content will be saved in a directory named after the domain you're s
 ## Troubleshooting
 
 If you encounter any issues:
+
 1. Ensure you're in the project directory when running the install command.
-2. Check that all required files (`agentim.py`, `scan.py`, `setup.py`, `requirements.txt`) are present in the project directory.
+2. Check that all required files are present in the project directory.
 3. Verify that you have the necessary permissions to install packages and write to the directory.
 4. If the `officely-scraper` command is not found after installation, try closing and reopening your terminal.
+5. Make sure your virtual environment is activated if you're using one.
 
 ## Development
 
 To set up the project for development:
 
-1. Clone the repository
-2. Create a virtual environment: `python -m venv venv`
-3. Activate the virtual environment:
-   - On Windows: `venv\Scripts\activate`
-   - On macOS and Linux: `source venv/bin/activate`
-4. Run `officely-scraper web scraper install` to install in editable mode
+1. Follow the installation steps above, using `pip install -e .` for an editable installation.
+2. Make your changes to the code.
+3. Run tests (if available) to ensure functionality.
 
 ## Contributing
 
