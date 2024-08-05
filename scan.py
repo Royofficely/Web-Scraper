@@ -2,7 +2,7 @@ import os
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-import config
+from . import config
 
 def sanitize_filename(url):
     invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
@@ -75,5 +75,8 @@ def run_scraper():
             file.write(f"URL: {url}\n\n{text}")
         print(f"Saved text from {url} to {filename}")
 
-if __name__ == "__main__":
+def main():
     run_scraper()
+
+if __name__ == "__main__":
+    main()
