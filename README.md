@@ -51,12 +51,12 @@ The scraper's behavior can be customized by editing the `officely_web_scraper/co
 
 ```python
 config = {
-    "domain": "https://help.officely.ai",  # The starting URL for scraping
+    "domain": "https://help.officely.ai",  # The main domain URL for scraping
     "include_keywords": None,  # List of keywords to include in URLs
     "exclude_keywords": None,  # List of keywords to exclude from URLs
     "max_depth": 1,  # Maximum recursion depth (None for unlimited)
     "target_div": None,  # Specific div class to target (None for whole page)
-    "start_with": None,  # List of URL prefixes to include
+    "start_with": None,  # filter by "start with" full url for example https://example.com/blog
 }
 ```
 
