@@ -21,16 +21,20 @@ A powerful, recursive URL-smart web scraping tool designed to efficiently collec
 1. Clone this repository:
    ```
    git clone https://github.com/Royofficely/Web-Scraper.git
-   cd Web-Scraper
    ```
+   
+2. Change to the correct folder:
+   ```
+   cd Web-Scraper
+   ```   
 
-2. (Optional but recommended) Create and activate a virtual environment:
+3. (Optional but recommended) Create and activate a virtual environment:
    ```
    python -m venv venv
    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
    ```
 
-3. Install the scraper and its dependencies:
+4. Install the scraper and its dependencies:
    ```
    pip install -e .
    ```
