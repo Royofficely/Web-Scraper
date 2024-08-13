@@ -46,7 +46,7 @@ def run_scraper():
             print(f"Config loaded successfully: {config.config}")
             from officely_web_scraper import scan
             reload(scan)
-            print(f"Using domain: {config.config['domain']}")  # Debug output
+            print(f"Using domain: {config.config['domain']}") # Debug output
             scan.run_scraper(config)
         except Exception as e:
             print(f"An error occurred while running the scraper: {e}")
@@ -61,9 +61,7 @@ def main():
     if len(sys.argv) != 2:
         print("Usage: python agentim.py [install|run]")
         sys.exit(1)
-
     command = sys.argv[1]
-
     if command == "install":
         install_dependencies()
         create_config()
