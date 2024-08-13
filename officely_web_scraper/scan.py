@@ -1,9 +1,12 @@
 import os
+import asyncio
+import aiohttp
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import time
 import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -15,19 +18,23 @@ USER_AGENTS = [
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
 
-def fetch_url_with_retry(url, max_retries=3, delay=5):
+async def fetch_url_with_retry(session, url, max_retries=3, delay=5):
+    if url.startswith('whatsapp://'):
+        print(f"Skipping WhatsApp URL: {url}")
+        return None
+    
     for attempt in range(max_retries):
         try:
             headers = {'User-Agent': get_random_user_agent()}
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            return response
-        except requests.RequestException as e:
-            print(f"Attempt {attempt + 1} failed: {e}")
+            async with session.get(url, headers=headers, timeout=30) as response:
+                response.raise_for_status()
+                return await response.text()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            print(f"Attempt {attempt + 1} failed for {url}: {e}")
             if attempt + 1 < max_retries:
                 wait_time = delay * (2 ** attempt)  # Exponential backoff
                 print(f"Waiting {wait_time} seconds before retrying...")
-                time.sleep(wait_time)
+                await asyncio.sleep(wait_time)
             else:
                 print(f"Failed to fetch {url} after {max_retries} attempts.")
                 return None
@@ -36,7 +43,7 @@ def sanitize_filename(url):
     invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
     for char in invalid_chars:
         url = url.replace(char, '_')
-    return url
+    return url[:200]  # Limit filename length
 
 def create_directory_for_domain(domain):
     domain_name = urlparse(domain).netloc
@@ -46,62 +53,99 @@ def create_directory_for_domain(domain):
     return directory_path
 
 def should_follow_url(url, config):
-    print(f"Checking URL: {url}")
-    if config.config['start_with']:
-        if not any(url.startswith(prefix) for prefix in config.config['start_with']):
-            print(f"Excluding URL, does not start with any specified prefixes: {url}")
+    if url.startswith('whatsapp://'):
+        return False
+    if config['start_with']:
+        if not url.startswith(config['start_with']):
             return False
-    if config.config['exclude_keywords']:
-        if any(keyword in url for keyword in config.config['exclude_keywords']):
-            print(f"Excluding URL, contains excluded keywords: {url}")
+    if config['exclude_keywords']:
+        if any(keyword in url for keyword in config['exclude_keywords']):
             return False
-    if config.config['include_keywords']:
-        if not any(keyword in url for keyword in config.config['include_keywords']):
-            print(f"Excluding URL, does not contain any included keywords: {url}")
+    if config['include_keywords']:
+        if not any(keyword in url for keyword in config['include_keywords']):
             return False
     return True
 
-def get_all_pages(url, config, depth=0):
-    if config.config['max_depth'] is not None and depth > config.config['max_depth']:
-        print(f"Max depth reached, stopping recursion at URL: {url}")
-        return set()
-    try:
-        response = fetch_url_with_retry(url)
-        if response is None or response.status_code != 200:
-            print(f"Failed to fetch URL: {url}")
-            return set()
-        soup = BeautifulSoup(response.content, 'html.parser')
-        found_urls = set()
-        for link in soup.find_all('a', href=True):
-            href = link['href']
-            full_url = urljoin(url, href.strip())
-            if should_follow_url(full_url, config):
-                found_urls.add(full_url)
-                found_urls.update(get_all_pages(full_url, config, depth + 1))
-        return found_urls
-    except Exception as e:
-        print(f"Error fetching {url}: {e}")
+async def process_url(session, url, config, depth, visited, max_depth):
+    if depth > max_depth or url in visited:
         return set()
 
-def download_text(url):
-    response = fetch_url_with_retry(url)
-    if response:
+    visited.add(url)
+    
+    content = await fetch_url_with_retry(session, url)
+    if content is None:
+        return set()
+
+    soup = BeautifulSoup(content, 'html.parser')
+    found_urls = set()
+
+    for link in soup.find_all('a', href=True):
+        href = link['href']
+        full_url = urljoin(url, href.strip())
+        if should_follow_url(full_url, config):
+            found_urls.add(full_url)
+
+    return found_urls
+
+async def get_all_pages(config):
+    async with aiohttp.ClientSession() as session:
+        visited = set()
+        to_visit = {config['domain']}
+        all_urls = set()
+        max_depth = config['max_depth'] if config['max_depth'] is not None else float('inf')
+
+        for depth in range(int(max_depth) + 1):
+            if not to_visit:
+                break
+
+            tasks = [process_url(session, url, config, depth, visited, max_depth) for url in to_visit]
+            results = await asyncio.gather(*tasks)
+
+            to_visit = set()
+            for result in results:
+                all_urls.update(result)
+                to_visit.update(result - visited)
+
+        return all_urls
+
+def download_text(url, config):
+    if url.startswith('whatsapp://'):
+        return f"Skipped WhatsApp URL: {url}"
+    
+    try:
+        headers = {'User-Agent': get_random_user_agent()}
+        response = requests.get(url, headers=headers, timeout=30)
+        response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
-        return soup.get_text(strip=True)
-    else:
-        return f"Error downloading content from {url}"
+        
+        if config['target_div']:
+            target_div = soup.find('div', class_=config['target_div'])
+            if target_div:
+                return target_div.get_text(strip=True)
+            else:
+                return f"Target div not found in {url}"
+        else:
+            return soup.get_text(strip=True)
+    except requests.RequestException as e:
+        return f"Error downloading content from {url}: {str(e)}"
+
+async def run_scraper_async(config):
+    print(f"Starting scraper with domain: {config['domain']}")
+    domain_directory = create_directory_for_domain(config['domain'])
+    urls = await get_all_pages(config)
+    
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(download_text, url, config) for url in urls]
+        
+        for future, url in zip(as_completed(futures), urls):
+            text = future.result()
+            filename = os.path.join(domain_directory, sanitize_filename(url) + ".txt")
+            with open(filename, "w", encoding="utf-8") as file:
+                file.write(f"URL: {url}\n\n{text}")
+            print(f"Saved text from {url} to {filename}")
 
 def run_scraper(config):
-    print(f"Starting scraper with domain: {config.config['domain']}")
-    domain_directory = create_directory_for_domain(config.config['domain'])
-    urls = get_all_pages(config.config['domain'], config)
-    for url in urls:
-        filename = os.path.join(domain_directory, sanitize_filename(url) + ".txt")
-        text = download_text(url)
-        with open(filename, "w", encoding="utf-8") as file:
-            file.write(f"URL: {url}\n\n{text}")
-        print(f"Saved text from {url} to {filename}")
-        time.sleep(random.uniform(1, 3))  # Random delay between requests
+    asyncio.run(run_scraper_async(config.config))
 
 def main():
     # This function is kept for backwards compatibility
