@@ -6,12 +6,16 @@ import importlib.util
 
 def install_dependencies():
     print("Installing Officely Web Scraper and its dependencies...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "-e", "."])
-    if os.path.exists("requirements.txt"):
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
-    else:
-        print("requirements.txt not found. Skipping additional dependencies.")
-    print("Installation complete. You can now run the scraper using 'python agentim.py run'.")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-e", "."])
+        if os.path.exists("requirements.txt"):
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
+        else:
+            print("requirements.txt not found. Skipping additional dependencies.")
+        print("Installation complete. You can now run the scraper using 'python agentim.py run'.")
+    except subprocess.CalledProcessError as e:
+        print(f"Error during installation: {e}")
+        sys.exit(1)
 
 def create_config():
     config_path = os.path.join("officely_web_scraper", "config.py")
@@ -31,14 +35,19 @@ def create_config():
 
 def load_config():
     config_path = os.path.join("officely_web_scraper", "config.py")
-    spec = importlib.util.spec_from_file_location("config", config_path)
-    config_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config_module)
-    return config_module
+    try:
+        spec = importlib.util.spec_from_file_location("config", config_path)
+        config_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(config_module)
+        return config_module
+    except Exception as e:
+        print(f"Error loading config: {e}")
+        sys.exit(1)
 
 def run_scraper():
     print(f"Current working directory: {os.getcwd()}")
     print(f"Contents of officely_web_scraper directory: {os.listdir('officely_web_scraper')}")
+    
     if os.path.exists("officely_web_scraper/scan.py"):
         print("Running the web scraper...")
         try:
@@ -47,7 +56,7 @@ def run_scraper():
             from officely_web_scraper import scan
             reload(scan)
             print(f"Using domain: {config.config['domain']}") # Debug output
-            scan.run_scraper(config)
+            scan.run_scraper(config.config)  # Pass config.config instead of config
         except Exception as e:
             print(f"An error occurred while running the scraper: {e}")
             import traceback
@@ -61,7 +70,9 @@ def main():
     if len(sys.argv) != 2:
         print("Usage: python agentim.py [install|run]")
         sys.exit(1)
+
     command = sys.argv[1]
+
     if command == "install":
         install_dependencies()
         create_config()
