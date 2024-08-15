@@ -19,10 +19,6 @@ def get_random_user_agent():
     return random.choice(USER_AGENTS)
 
 async def fetch_url_with_retry(session, url, max_retries=3, delay=5):
-    if url.startswith('whatsapp://'):
-        print(f"Skipping WhatsApp URL: {url}")
-        return None
-    
     for attempt in range(max_retries):
         try:
             headers = {'User-Agent': get_random_user_agent()}
@@ -53,17 +49,25 @@ def create_directory_for_domain(domain):
     return directory_path
 
 def should_follow_url(url, config):
-    if url.startswith('whatsapp://'):
+    # Check if the URL starts with the specified prefix
+    if config['start_with'] and not url.startswith(config['start_with']):
         return False
-    if config['start_with']:
-        if not url.startswith(config['start_with']):
-            return False
+    
+    # Check for excluded keywords
     if config['exclude_keywords']:
         if any(keyword in url for keyword in config['exclude_keywords']):
             return False
+    
+    # Check for included keywords
     if config['include_keywords']:
         if not any(keyword in url for keyword in config['include_keywords']):
             return False
+    
+    # Check for specific protocols to exclude (e.g., WhatsApp)
+    excluded_protocols = ['whatsapp:', 'tel:', 'mailto:']
+    if any(url.startswith(protocol) for protocol in excluded_protocols):
+        return False
+    
     return True
 
 async def process_url(session, url, config, depth, visited, max_depth):
@@ -109,9 +113,6 @@ async def get_all_pages(config):
         return all_urls
 
 def download_text(url, config):
-    if url.startswith('whatsapp://'):
-        return f"Skipped WhatsApp URL: {url}"
-    
     try:
         headers = {'User-Agent': get_random_user_agent()}
         response = requests.get(url, headers=headers, timeout=30)
@@ -143,14 +144,9 @@ async def run_scraper_async(config):
             with open(filename, "w", encoding="utf-8") as file:
                 file.write(f"URL: {url}\n\n{text}")
             print(f"Saved text from {url} to {filename}")
-
 def run_scraper(config):
-    asyncio.run(run_scraper_async(config.config))
-
-def main():
-    # This function is kept for backwards compatibility
-    # but it's not used in the current setup
-    pass
+    asyncio.run(run_scraper_async(config))
 
 if __name__ == "__main__":
-    main()
+    from config import config
+    run_scraper(config)
