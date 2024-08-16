@@ -6,7 +6,11 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 import time
 import random
+import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import chardet
+from aiohttp import ClientSession, TCPConnector
+from aiohttp.client_exceptions import ClientResponseError
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -18,22 +22,33 @@ USER_AGENTS = [
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
 
-async def fetch_url_with_retry(session, url, max_retries=3, delay=5):
-    for attempt in range(max_retries):
+async def fetch_url_with_retry(session, url, config):
+    for attempt in range(config['max_retries']):
         try:
             headers = {'User-Agent': get_random_user_agent()}
             async with session.get(url, headers=headers, timeout=30) as response:
+                if response.status == 429:
+                    retry_after = int(response.headers.get('Retry-After', config['base_delay']))
+                    print(f"Rate limited. Waiting for {retry_after} seconds before retrying...")
+                    await asyncio.sleep(retry_after)
+                    continue
+                
                 response.raise_for_status()
-                return await response.text()
+                content = await response.read()
+                encoding = response.charset or chardet.detect(content)['encoding']
+                return content.decode(encoding, errors='replace')
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             print(f"Attempt {attempt + 1} failed for {url}: {e}")
-            if attempt + 1 < max_retries:
-                wait_time = delay * (2 ** attempt)  # Exponential backoff
+            if attempt + 1 < config['max_retries']:
+                wait_time = config['base_delay'] * (2 ** attempt)  # Exponential backoff
                 print(f"Waiting {wait_time} seconds before retrying...")
                 await asyncio.sleep(wait_time)
             else:
-                print(f"Failed to fetch {url} after {max_retries} attempts.")
+                print(f"Failed to fetch {url} after {config['max_retries']} attempts.")
                 return None
+        except Exception as e:
+            print(f"Unexpected error for {url}: {e}")
+            return None
 
 def sanitize_filename(url):
     invalid_chars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
@@ -49,34 +64,31 @@ def create_directory_for_domain(domain):
     return directory_path
 
 def should_follow_url(url, config):
-    # Check if the URL starts with the specified prefix
     if config['start_with'] and not url.startswith(config['start_with']):
         return False
     
-    # Check for excluded keywords
     if config['exclude_keywords']:
         if any(keyword in url for keyword in config['exclude_keywords']):
             return False
     
-    # Check for included keywords
     if config['include_keywords']:
         if not any(keyword in url for keyword in config['include_keywords']):
             return False
     
-    # Check for specific protocols to exclude (e.g., WhatsApp)
-    excluded_protocols = ['whatsapp:', 'tel:', 'mailto:']
-    if any(url.startswith(protocol) for protocol in excluded_protocols):
+    if any(url.startswith(protocol) for protocol in config['excluded_protocols']):
         return False
     
     return True
 
-async def process_url(session, url, config, depth, visited, max_depth):
+async def process_url(session, url, config, depth, visited, max_depth, semaphore):
     if depth > max_depth or url in visited:
         return set()
 
     visited.add(url)
     
-    content = await fetch_url_with_retry(session, url)
+    async with semaphore:  # Use semaphore to limit concurrent requests
+        content = await fetch_url_with_retry(session, url, config)
+    
     if content is None:
         return set()
 
@@ -92,17 +104,19 @@ async def process_url(session, url, config, depth, visited, max_depth):
     return found_urls
 
 async def get_all_pages(config):
-    async with aiohttp.ClientSession() as session:
+    connector = TCPConnector(limit_per_host=config['connections_per_host'])
+    async with ClientSession(connector=connector) as session:
         visited = set()
         to_visit = {config['domain']}
         all_urls = set()
         max_depth = config['max_depth'] if config['max_depth'] is not None else float('inf')
+        semaphore = asyncio.Semaphore(config['concurrent_requests'])
 
         for depth in range(int(max_depth) + 1):
             if not to_visit:
                 break
 
-            tasks = [process_url(session, url, config, depth, visited, max_depth) for url in to_visit]
+            tasks = [process_url(session, url, config, depth, visited, max_depth, semaphore) for url in to_visit]
             results = await asyncio.gather(*tasks)
 
             to_visit = set()
@@ -110,40 +124,92 @@ async def get_all_pages(config):
                 all_urls.update(result)
                 to_visit.update(result - visited)
 
+            # Add a small delay between depth levels
+            await asyncio.sleep(1)
+
         return all_urls
 
-def download_text(url, config):
-    try:
-        headers = {'User-Agent': get_random_user_agent()}
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        if config['target_div']:
-            target_div = soup.find('div', class_=config['target_div'])
-            if target_div:
-                return target_div.get_text(strip=True)
+def download_text_with_retry(url, config):
+    for attempt in range(config['max_retries']):
+        try:
+            headers = {'User-Agent': get_random_user_agent()}
+            response = requests.get(url, headers=headers, timeout=30)
+            
+            if response.status_code == 429:
+                retry_after = int(response.headers.get('Retry-After', config['base_delay']))
+                print(f"Rate limited. Waiting for {retry_after} seconds before retrying...")
+                time.sleep(retry_after)
+                continue
+            
+            response.raise_for_status()
+
+            content = response.content
+            encoding = response.encoding or chardet.detect(content)['encoding']
+            text = content.decode(encoding, errors='replace')
+
+            soup = BeautifulSoup(text, 'html.parser')
+
+            if config['target_div']:
+                target_div = soup.find('div', class_=config['target_div'])
+                if target_div:
+                    text = target_div.get_text(strip=True)
+                else:
+                    text = f"Target div not found in {url}"
             else:
-                return f"Target div not found in {url}"
-        else:
-            return soup.get_text(strip=True)
-    except requests.RequestException as e:
-        return f"Error downloading content from {url}: {str(e)}"
+                text = soup.get_text(strip=True)
+
+            return text
+        except requests.RequestException as e:
+            print(f"Attempt {attempt + 1} failed for {url}: {e}")
+            if attempt + 1 < config['max_retries']:
+                wait_time = config['base_delay'] * (2 ** attempt)  # Exponential backoff
+                print(f"Waiting {wait_time} seconds before retrying...")
+                time.sleep(wait_time)
+            else:
+                return f"Error downloading content from {url}: {str(e)}"
+        except Exception as e:
+            return f"Unexpected error processing {url}: {str(e)}"
+
+def split_text(text, max_length):
+    """Split text into chunks of maximum length."""
+    return [text[i:i+max_length] for i in range(0, len(text), max_length)]
 
 async def run_scraper_async(config):
     print(f"Starting scraper with domain: {config['domain']}")
     domain_directory = create_directory_for_domain(config['domain'])
     urls = await get_all_pages(config)
-    
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(download_text, url, config) for url in urls]
-        
-        for future, url in zip(as_completed(futures), urls):
-            text = future.result()
-            filename = os.path.join(domain_directory, sanitize_filename(url) + ".txt")
-            with open(filename, "w", encoding="utf-8") as file:
-                file.write(f"URL: {url}\n\n{text}")
-            print(f"Saved text from {url} to {filename}")
+
+    csv_filename = os.path.join(domain_directory, "scraped_data.csv")
+
+    with ThreadPoolExecutor(max_workers=config['concurrent_requests']) as executor:
+        futures = [executor.submit(download_text_with_retry, url, config) for url in urls]
+
+        with open(csv_filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            csv_writer = csv.writer(csvfile)
+            csv_writer.writerow(['URL', 'Scraped Text', 'Chunk Number'])
+
+            for future, url in zip(as_completed(futures), urls):
+                text = future.result()
+                if text is not None:
+                    try:
+                        text_chunks = split_text(text, config['split_length'])
+                        for i, chunk in enumerate(text_chunks, 1):
+                            csv_writer.writerow([url, chunk, i])
+                        print(f"Saved text from {url} to CSV (in {len(text_chunks)} chunks)")
+                    except Exception as e:
+                        print(f"Error saving text from {url}: {str(e)}")
+                        with open('error_log.txt', 'a', encoding='utf-8') as error_log:
+                            error_log.write(f"Error saving text from {url}: {str(e)}\n")
+                else:
+                    print(f"No text retrieved from {url}")
+                    with open('error_log.txt', 'a', encoding='utf-8') as error_log:
+                        error_log.write(f"No text retrieved from {url}\n")
+
+                # Add a small delay between requests
+                time.sleep(config['delay_between_requests'])
+
+    print(f"All data saved to {csv_filename}")
+
 def run_scraper(config):
     asyncio.run(run_scraper_async(config))
 
