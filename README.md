@@ -10,6 +10,11 @@ A powerful, recursive URL-smart web scraping tool designed to efficiently collec
 - 📁 **Organized Output**: Automatically creates a directory structure based on the domain being scraped.
 - 🛡️ **Respectful Scraping**: Implements user-agent rotation and retry logic with exponential backoff to respect website policies.
 - ⚙️ **Highly Configurable**: Easy-to-use configuration file for customizing scraping behavior.
+- 📊 **Text Splitting**: Automatically splits long texts into smaller chunks to avoid metadata size limits.
+- 🚫 **Protocol Exclusion**: Easily exclude specific protocols (e.g., WhatsApp, tel, mailto) from scraping.
+- 🔄 **Flexible Retry Mechanism**: Configurable maximum retries and base delay for failed requests.
+- 🚦 **Concurrent Request Control**: Set limits on concurrent requests and connections per host.
+- ⏱️ **Request Pacing**: Configurable delay between individual requests to prevent overwhelming target servers.
 
 ## Prerequisites
 
@@ -22,18 +27,15 @@ A powerful, recursive URL-smart web scraping tool designed to efficiently collec
    ```
    git clone https://github.com/Royofficely/Web-Scraper.git
    ```
-
 2. Change to the project directory:
    ```
    cd Web-Scraper
    ```
-
 3. (Optional but recommended) Create and activate a virtual environment:
    ```
    python -m venv venv
    source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
    ```
-
 4. Install the scraper and its dependencies:
    ```
    python agentim.py install
@@ -43,7 +45,6 @@ A powerful, recursive URL-smart web scraping tool designed to efficiently collec
 ## Usage
 
 After installation, you can run the scraper from the project directory:
-
 ```
 python agentim.py run
 ```
@@ -60,6 +61,13 @@ config = {
     "max_depth": 1,  # Maximum recursion depth (None for unlimited)
     "target_div": None,  # Specific div class to target (None for whole page)
     "start_with": None,  # Filter by "start with" the url. For example: ["https://example.com/blog"]
+    "split_length": 2000,  # Maximum length of text chunks for CSV rows
+    "excluded_protocols": ['whatsapp:', 'tel:', 'mailto:'],  # Protocols to exclude from scraping
+    "max_retries": 5,  # Maximum number of retry attempts for failed requests
+    "base_delay": 1,  # Base delay (in seconds) for exponential backoff
+    "concurrent_requests": 10,  # Maximum number of concurrent requests
+    "connections_per_host": 5,  # Maximum number of connections per host
+    "delay_between_requests": 0.5,  # Delay (in seconds) between individual requests
 }
 ```
 
@@ -67,7 +75,7 @@ Adjust these settings according to your scraping needs.
 
 ## Output
 
-The scraped content will be saved in a directory named after the domain you're scraping, with each page's content stored in a separate text file.
+The scraped content will be saved in a CSV file within a directory named after the domain you're scraping. The CSV file will contain columns for the URL, scraped text, and chunk number (for split texts).
 
 ## Troubleshooting
 
@@ -79,6 +87,7 @@ If you encounter any issues:
 4. Make sure your virtual environment is activated if you're using one.
 5. If you encounter 503 errors or other connection issues, the scraper will automatically retry with exponential backoff.
 6. Check the console output for any error messages or debugging information.
+7. Adjust the configuration parameters (e.g., `concurrent_requests`, `delay_between_requests`) if you're experiencing rate limiting or other access issues.
 
 ## Development
 
