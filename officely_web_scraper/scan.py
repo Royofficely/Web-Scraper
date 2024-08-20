@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import chardet
 from aiohttp import ClientSession, TCPConnector
 from aiohttp.client_exceptions import ClientResponseError
+import logging
 
 USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
@@ -18,6 +19,9 @@ USER_AGENTS = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:90.0) Gecko/20100101 Firefox/90.0',
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
 ]
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_random_user_agent():
     return random.choice(USER_AGENTS)
@@ -29,7 +33,7 @@ async def fetch_url_with_retry(session, url, config):
             async with session.get(url, headers=headers, timeout=30) as response:
                 if response.status == 429:
                     retry_after = int(response.headers.get('Retry-After', config['base_delay']))
-                    print(f"Rate limited. Waiting for {retry_after} seconds before retrying...")
+                    logging.warning(f"Rate limited. Waiting for {retry_after} seconds before retrying...")
                     await asyncio.sleep(retry_after)
                     continue
                 
@@ -38,16 +42,16 @@ async def fetch_url_with_retry(session, url, config):
                 encoding = response.charset or chardet.detect(content)['encoding']
                 return content.decode(encoding, errors='replace')
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
-            print(f"Attempt {attempt + 1} failed for {url}: {e}")
+            logging.error(f"Attempt {attempt + 1} failed for {url}: {e}")
             if attempt + 1 < config['max_retries']:
                 wait_time = config['base_delay'] * (2 ** attempt)  # Exponential backoff
-                print(f"Waiting {wait_time} seconds before retrying...")
+                logging.info(f"Waiting {wait_time} seconds before retrying...")
                 await asyncio.sleep(wait_time)
             else:
-                print(f"Failed to fetch {url} after {config['max_retries']} attempts.")
+                logging.error(f"Failed to fetch {url} after {config['max_retries']} attempts.")
                 return None
         except Exception as e:
-            print(f"Unexpected error for {url}: {e}")
+            logging.error(f"Unexpected error for {url}: {e}")
             return None
 
 def sanitize_filename(url):
@@ -137,7 +141,7 @@ def download_text_with_retry(url, config):
             
             if response.status_code == 429:
                 retry_after = int(response.headers.get('Retry-After', config['base_delay']))
-                print(f"Rate limited. Waiting for {retry_after} seconds before retrying...")
+                logging.warning(f"Rate limited. Waiting for {retry_after} seconds before retrying...")
                 time.sleep(retry_after)
                 continue
             
@@ -145,70 +149,82 @@ def download_text_with_retry(url, config):
 
             content = response.content
             encoding = response.encoding or chardet.detect(content)['encoding']
-            text = content.decode(encoding, errors='replace')
+            html = content.decode(encoding, errors='replace')
 
-            soup = BeautifulSoup(text, 'html.parser')
+            soup = BeautifulSoup(html, 'html.parser')
 
             if config['target_div']:
-                target_div = soup.find('div', class_=config['target_div'])
-                if target_div:
-                    text = target_div.get_text(strip=True)
-                else:
-                    text = f"Target div not found in {url}"
+                result = {}
+                for selector in config['target_div']:
+                    elements = soup.select(selector)
+                    text = "\n".join([element.get_text(strip=True) for element in elements])
+                    result[selector] = text if text else "Not found"
+                if all(value == "Not found" for value in result.values()):
+                    logging.warning(f"No target divs found in {url}")
+                    return None
+                return (url, result)  # Return both URL and result
             else:
-                text = soup.get_text(strip=True)
-
-            return text
+                return (url, {"full_text": soup.get_text(strip=True)})
         except requests.RequestException as e:
-            print(f"Attempt {attempt + 1} failed for {url}: {e}")
+            logging.error(f"Attempt {attempt + 1} failed for {url}: {e}")
             if attempt + 1 < config['max_retries']:
                 wait_time = config['base_delay'] * (2 ** attempt)  # Exponential backoff
-                print(f"Waiting {wait_time} seconds before retrying...")
+                logging.info(f"Waiting {wait_time} seconds before retrying...")
                 time.sleep(wait_time)
             else:
-                return f"Error downloading content from {url}: {str(e)}"
+                logging.error(f"Error downloading content from {url}: {str(e)}")
+                return None
         except Exception as e:
-            return f"Unexpected error processing {url}: {str(e)}"
+            logging.error(f"Unexpected error processing {url}: {str(e)}")
+            return None
 
 def split_text(text, max_length):
     """Split text into chunks of maximum length."""
-    return [text[i:i+max_length] for i in range(0, len(text), max_length)]
+    return [text[i:i+max_length] for i in range(0, len(text), max_length)] if max_length else [text]
 
 async def run_scraper_async(config):
-    print(f"Starting scraper with domain: {config['domain']}")
+    logging.info(f"Starting scraper with domain: {config['domain']}")
     domain_directory = create_directory_for_domain(config['domain'])
     urls = await get_all_pages(config)
 
     csv_filename = os.path.join(domain_directory, "scraped_data.csv")
 
     with ThreadPoolExecutor(max_workers=config['concurrent_requests']) as executor:
-        futures = [executor.submit(download_text_with_retry, url, config) for url in urls]
+        futures = [executor.submit(download_text_with_retry, url, config) for url in urls if should_follow_url(url, config)]
 
         with open(csv_filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            csv_writer = csv.writer(csvfile)
-            csv_writer.writerow(['URL', 'Scraped Text', 'Chunk Number'])
+            fieldnames = ['URL'] + config['target_div'] + ['Chunk Number']
+            csv_writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            csv_writer.writeheader()
 
-            for future, url in zip(as_completed(futures), urls):
-                text = future.result()
-                if text is not None:
-                    try:
-                        text_chunks = split_text(text, config['split_length'])
-                        for i, chunk in enumerate(text_chunks, 1):
-                            csv_writer.writerow([url, chunk, i])
-                        print(f"Saved text from {url} to CSV (in {len(text_chunks)} chunks)")
-                    except Exception as e:
-                        print(f"Error saving text from {url}: {str(e)}")
-                        with open('error_log.txt', 'a', encoding='utf-8') as error_log:
-                            error_log.write(f"Error saving text from {url}: {str(e)}\n")
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    url, content = result
+                    if content and all(content.get(selector) and content.get(selector) != "Not found" for selector in config['target_div']):
+                        try:
+                            # Determine the maximum number of chunks across all columns
+                            max_chunks = max(len(split_text(content[selector], config['split_length'])) 
+                                             for selector in config['target_div'])
+                            
+                            for i in range(max_chunks):
+                                row = {'URL': url, 'Chunk Number': i + 1}
+                                for selector in config['target_div']:
+                                    chunks = split_text(content[selector], config['split_length'])
+                                    row[selector] = chunks[i] if i < len(chunks) else ''
+                                csv_writer.writerow(row)
+                            logging.info(f"Saved text from {url} to CSV (in {max_chunks} chunks)")
+                        except Exception as e:
+                            logging.error(f"Error saving text from {url}: {str(e)}")
+                    else:
+                        logging.warning(f"No valid content found for {url}")
                 else:
-                    print(f"No text retrieved from {url}")
-                    with open('error_log.txt', 'a', encoding='utf-8') as error_log:
-                        error_log.write(f"No text retrieved from {url}\n")
+                    logging.warning(f"No valid URL or content found for a request")
 
                 # Add a small delay between requests
                 time.sleep(config['delay_between_requests'])
 
-    print(f"All data saved to {csv_filename}")
+    logging.info(f"All data saved to {csv_filename}")
 
 def run_scraper(config):
     asyncio.run(run_scraper_async(config))
