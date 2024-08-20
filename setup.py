@@ -8,7 +8,7 @@ with open("requirements.txt", "r", encoding="utf-8") as fh:
 
 setup(
     name="officely-web-scraper",
-    version="0.1.0",
+    version=""1.0.0",
     author="Roy Nativ",
     author_email="roy@officely.ai",
     description="A powerful, recursive URL-smart web scraping tool",
