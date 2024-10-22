@@ -1,11 +1,11 @@
 config = {
-    "domain": "https://www.example.com",  # The main domain URL for scraping
-    "include_keywords": None,  # List of keywords to include in URLs
+    "domain": "https://example.com",  # The main domain URL for scraping
+    "include_keywords": ["example"],  # List of keywords to include in URLs
     "exclude_keywords": None,  # List of keywords to exclude from URLs
     "max_depth": 1,  # Maximum recursion depth (None for unlimited)
     "target_div": None,  # Specific div class to target (None for whole page)
     "start_with": None,  # Filter by "start with" the url. For example: ["https://example.com/blog"]
-    "split_length": 2000,  # Maximum length of text chunks for CSV rows
+    "split_length": None,  # Maximum length of text chunks for CSV rows
     "excluded_protocols": ['whatsapp:', 'tel:', 'mailto:'],  # Protocols to exclude from scraping
     "max_retries": 5,  # Maximum number of retry attempts for failed requests
     "base_delay": 1,  # Base delay (in seconds) for exponential backoff
