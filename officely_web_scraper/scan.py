@@ -148,8 +148,9 @@ class WebScraper:
             logging.warning("No URLs found to scrape. Check your domain and keyword settings.")
             return
 
-        # Process and save content
-        fieldnames = ['URL', 'Content', 'Chunk Number']
+        # Dynamically create fieldnames based on target_divs
+        fieldnames = ['URL'] + list(self.config['target_divs'].keys()) + ['Chunk Number']
+        
         with open(csv_filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
             writer.writeheader()
@@ -160,22 +161,23 @@ class WebScraper:
                     if content:
                         soup = BeautifulSoup(content, 'html.parser')
                         
-                        if self.config['target_div']:
-                            elements = soup.select(self.config['target_div'])
-                            text = "\n".join([element.get_text(strip=True) for element in elements])
-                        else:
-                            text = soup.get_text(strip=True)
+                        extracted_content = {}
+                        for key, div_info in self.config['target_divs'].items():
+                            elements = soup.select(div_info['selector'])
+                            extracted_content[key] = ' '.join([element.get_text(strip=True) for element in elements])
                         
-                        chunks = self.split_text(text, self.config['split_length'])
+                        # Combine all extracted content
+                        combined_text = ' '.join(extracted_content.values())
+                        chunks = self.split_text(combined_text, self.config['split_length'])
+                        
                         for i, chunk in enumerate(chunks, 1):
                             content_hash = hashlib.md5(chunk.encode()).hexdigest()
                             if content_hash not in self.seen_content:
                                 self.seen_content.add(content_hash)
-                                writer.writerow({
-                                    'URL': url,
-                                    'Content': chunk,
-                                    'Chunk Number': i
-                                })
+                                row = {'URL': url, 'Chunk Number': i}
+                                row.update(extracted_content)
+                                writer.writerow(row)
+                        
                         logging.info(f"Processed URL: {url}")
                     else:
                         logging.error(f"Failed to fetch content from {url}")
