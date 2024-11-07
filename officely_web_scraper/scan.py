@@ -73,7 +73,25 @@ class WebScraper:
         if self.config['include_keywords'] and not any(keyword in url for keyword in self.config['include_keywords']):
             return False
         
+        parsed_url = urlparse(url)
+        if any(url.startswith(protocol) for protocol in self.config['excluded_protocols']):
+            return False
+            
+        domain_name = urlparse(self.config['domain']).netloc
+        if domain_name not in parsed_url.netloc:
+            return False
+        
         return True
+
+    def extract_text_content(self, soup: BeautifulSoup) -> str:
+        # Remove script and style elements
+        for script in soup(["script", "style"]):
+            script.decompose()
+            
+        # Get text content
+        text = soup.get_text(separator=' ', strip=True)
+        # Normalize whitespace
+        return ' '.join(text.split())
 
     async def process_url(self, session: ClientSession, url: str, depth: int, max_depth: int, 
                          semaphore: asyncio.Semaphore) -> Set[str]:
@@ -128,7 +146,9 @@ class WebScraper:
 
     @staticmethod
     def split_text(text: str, max_length: Optional[int]) -> list[str]:
-        return [text[i:i+max_length] for i in range(0, len(text), max_length)] if max_length else [text]
+        if not max_length:
+            return [text] if text else []
+        return [text[i:i+max_length] for i in range(0, len(text), max_length)] if text else []
 
     async def run(self):
         logging.info(f"Starting scraper with domain: {self.config['domain']}")
@@ -148,8 +168,8 @@ class WebScraper:
             logging.warning("No URLs found to scrape. Check your domain and keyword settings.")
             return
 
-        # Dynamically create fieldnames based on target_divs
-        fieldnames = ['URL'] + list(self.config['target_divs'].keys()) + ['Chunk Number']
+        # Define fieldnames based on whether target_divs is specified
+        fieldnames = ['URL', 'Content', 'Chunk Number']
         
         with open(csv_filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -161,21 +181,21 @@ class WebScraper:
                     if content:
                         soup = BeautifulSoup(content, 'html.parser')
                         
-                        extracted_content = {}
-                        for key, div_info in self.config['target_divs'].items():
-                            elements = soup.select(div_info['selector'])
-                            extracted_content[key] = ' '.join([element.get_text(strip=True) for element in elements])
-                        
-                        # Combine all extracted content
-                        combined_text = ' '.join(extracted_content.values())
-                        chunks = self.split_text(combined_text, self.config['split_length'])
+                        # Extract all text content from the page
+                        text_content = self.extract_text_content(soup)
+                        chunks = self.split_text(text_content, self.config['split_length'])
                         
                         for i, chunk in enumerate(chunks, 1):
+                            if not chunk:  # Skip empty chunks
+                                continue
                             content_hash = hashlib.md5(chunk.encode()).hexdigest()
                             if content_hash not in self.seen_content:
                                 self.seen_content.add(content_hash)
-                                row = {'URL': url, 'Chunk Number': i}
-                                row.update(extracted_content)
+                                row = {
+                                    'URL': url,
+                                    'Content': chunk,
+                                    'Chunk Number': i
+                                }
                                 writer.writerow(row)
                         
                         logging.info(f"Processed URL: {url}")
