@@ -88,14 +88,37 @@ class WebScraper:
             script.decompose()
         text = soup.get_text(separator=' ', strip=True)
         return ' '.join(text.split())
-
     async def scan_website(self, url: str):
-        connector = TCPConnector(limit_per_host=self.config.get('connections_per_host', 5))
-        async with ClientSession(connector=connector) as session:
-            semaphore = asyncio.Semaphore(self.config.get('concurrent_requests', 10))
-            await self._process_url(session, url, 0, semaphore)
-        return self.results
-
+        """API endpoint method that returns results in JSON format"""
+        urls = await self.get_all_pages()
+        results = []
+        
+        async with ClientSession() as session:
+            for url in urls:
+                content = await self.fetch_url_with_retry(session, url)
+                if content:
+                    soup = BeautifulSoup(content, 'html.parser')
+                    text_content = self.extract_text_content(soup)
+                    chunks = self.split_text(text_content, self.config.get('split_length'))
+                    
+                    for chunk in chunks:
+                        if chunk:
+                            content_hash = hashlib.md5(chunk.encode()).hexdigest()
+                            if content_hash not in self.seen_content:
+                                self.seen_content.add(content_hash)
+                                results.append({
+                                    "url": url,
+                                    "content": {
+                                        "main": {
+                                            "title": soup.title.string if soup.title else "No Title",
+                                            "text": chunk
+                                        }
+                                    }
+                                })
+                
+                await asyncio.sleep(self.config.get('delay_between_requests', 0.5))
+        
+        return results
     async def _process_url(self, session: ClientSession, url: str, depth: int, semaphore: asyncio.Semaphore):
         if depth > self.config.get('max_depth', 3) or url in self.visited:
             return
