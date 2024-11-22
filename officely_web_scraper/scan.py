@@ -90,34 +90,38 @@ class WebScraper:
         return ' '.join(text.split())
     async def scan_website(self, url: str):
         """API endpoint method that returns results in JSON format"""
-        urls = await self.get_all_pages()
-        results = []
+        connector = TCPConnector(limit_per_host=self.config['connections_per_host'])
+        async with ClientSession(connector=connector) as session:
+            semaphore = asyncio.Semaphore(self.config['concurrent_requests'])
+            to_visit = {url}
+            results = []
         
-        async with ClientSession() as session:
-            for url in urls:
-                content = await self.fetch_url_with_retry(session, url)
+            while to_visit:
+                current_url = to_visit.pop()
+                if current_url in self.visited:
+                    continue
+                
+                self.visited.add(current_url)
+                content = await self.fetch_url_with_retry(session, current_url)
+            
                 if content:
                     soup = BeautifulSoup(content, 'html.parser')
                     text_content = self.extract_text_content(soup)
-                    chunks = self.split_text(text_content, self.config.get('split_length'))
-                    
-                    for chunk in chunks:
-                        if chunk:
-                            content_hash = hashlib.md5(chunk.encode()).hexdigest()
-                            if content_hash not in self.seen_content:
-                                self.seen_content.add(content_hash)
-                                results.append({
-                                    "url": url,
-                                    "content": {
-                                        "main": {
-                                            "title": soup.title.string if soup.title else "No Title",
-                                            "text": chunk
-                                        }
-                                    }
-                                })
                 
-                await asyncio.sleep(self.config.get('delay_between_requests', 0.5))
-        
+                    if text_content:
+                        results.append({
+                            "url": current_url,
+                            "content": text_content
+                        })
+                
+                    # Find new URLs to visit
+                    for link in soup.find_all('a', href=True):
+                        next_url = urljoin(current_url, link['href'])
+                        if self.should_follow_url(next_url) and next_url not in self.visited:
+                            to_visit.add(next_url)
+            
+                await asyncio.sleep(self.config['delay_between_requests'])
+    
         return results
     async def _process_url(self, session: ClientSession, url: str, depth: int, semaphore: asyncio.Semaphore):
         if depth > self.config.get('max_depth', 3) or url in self.visited:
