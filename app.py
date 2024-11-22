@@ -1,17 +1,20 @@
 from flask import Flask, request, jsonify
 from officely_web_scraper.scan import WebScraper
 import asyncio
-from quart import Quart
 
-app = Quart(__name__)
+app = Flask(__name__)
+
+def run_async(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 @app.route('/scrape', methods=['POST'])
-async def scrape():
-    config = await request.get_json()
+def scrape():
+    config = request.get_json()
     scraper = WebScraper(config)
-    async with scraper as s:
-        results = await s.scan_website(config['domain'])
+    results = run_async(scraper.scan_website(config['domain']))
     return jsonify(results)
-
-if __name__ == '__main__':
-    app.run()
