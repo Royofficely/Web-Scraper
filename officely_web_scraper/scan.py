@@ -146,36 +146,39 @@ class WebScraper:
 
     @staticmethod
     def split_text(text: str, max_length: Optional[int]) -> list[str]:
-        class WebScraper:
-            def __init__(self, config: dict):
-                self.config = config
-                self.visited: Set[str] = set()
-                self.seen_content: Set[str] = set()
-                self.results = []  # New list to store results
+        # Implementation of split_text function goes here
+        pass
 
-            async def process_content(self, url: str, soup: BeautifulSoup):
-                data = {
-                    "url": url,
-                    "content": {}
-                }
-        
-                for div_key, div_info in self.config["target_divs"].items():
-                    selector = div_info["selector"]
-                    element = soup.select_one(selector)
-                    if element:
-                        data["content"][div_key] = {
-                            "title": div_info["title"],
-                            "text": element.get_text(strip=True)
-                        }
-        
-                self.results.append(data)
+    class WebScraper:
+        def __init__(self, config: dict):
+            self.config = config
+            self.visited: Set[str] = set()
+            self.seen_content: Set[str] = set()
+            self.results = []  # New list to store results
 
-            async def run(self):
-                async with aiohttp.ClientSession(connector=TCPConnector(limit=self.config['connections_per_host'])) as session:
-                    await self.scrape_url(session, self.config['domain'], depth=0)
-                return self.results
+        async def process_content(self, url: str, soup: BeautifulSoup):
+            data = {
+                "url": url,
+                "content": {}
+            }
 
-        def run_scraper(config: dict):
-    """Run the web scraper with the given configuration."""
-    scraper = WebScraper(config)
-    asyncio.run(scraper.run())
+            for div_key, div_info in self.config["target_divs"].items():
+                selector = div_info["selector"]
+                element = soup.select_one(selector)
+                if element:
+                    data["content"][div_key] = {
+                        "title": div_info["title"],
+                        "text": element.get_text(strip=True)
+                    }
+
+            self.results.append(data)
+
+        async def run(self):
+            async with aiohttp.ClientSession(connector=TCPConnector(limit=self.config['connections_per_host'])) as session:
+                await self.scrape_url(session, self.config['domain'], depth=0)
+            return self.results
+
+    def run_scraper(config: dict):
+        """Run the web scraper with the given configuration."""
+        scraper = WebScraper(config)
+        asyncio.run(scraper.run())
