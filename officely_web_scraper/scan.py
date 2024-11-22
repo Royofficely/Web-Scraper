@@ -146,67 +146,36 @@ class WebScraper:
 
     @staticmethod
     def split_text(text: str, max_length: Optional[int]) -> list[str]:
-        if not max_length:
-            return [text] if text else []
-        return [text[i:i+max_length] for i in range(0, len(text), max_length)] if text else []
+        class WebScraper:
+            def __init__(self, config: dict):
+                self.config = config
+                self.visited: Set[str] = set()
+                self.seen_content: Set[str] = set()
+                self.results = []  # New list to store results
 
-    async def run(self):
-        logging.info(f"Starting scraper with domain: {self.config['domain']}")
+            async def process_content(self, url: str, soup: BeautifulSoup):
+                data = {
+                    "url": url,
+                    "content": {}
+                }
         
-        # Create output directory
-        domain_name = urlparse(self.config['domain']).netloc
-        directory_path = os.path.join(os.getcwd(), domain_name)
-        os.makedirs(directory_path, exist_ok=True)
+                for div_key, div_info in self.config["target_divs"].items():
+                    selector = div_info["selector"]
+                    element = soup.select_one(selector)
+                    if element:
+                        data["content"][div_key] = {
+                            "title": div_info["title"],
+                            "text": element.get_text(strip=True)
+                        }
         
-        csv_filename = os.path.join(directory_path, 'scraped_data.csv')
-        
-        # Get all URLs to scrape
-        urls = await self.get_all_pages()
-        logging.info(f"Found {len(urls)} URLs to scrape")
-        
-        if not urls:
-            logging.warning("No URLs found to scrape. Check your domain and keyword settings.")
-            return
+                self.results.append(data)
 
-        # Define fieldnames based on whether target_divs is specified
-        fieldnames = ['URL', 'Content', 'Chunk Number']
-        
-        with open(csv_filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-            writer.writeheader()
+            async def run(self):
+                async with aiohttp.ClientSession(connector=TCPConnector(limit=self.config['connections_per_host'])) as session:
+                    await self.scrape_url(session, self.config['domain'], depth=0)
+                return self.results
 
-            async with ClientSession() as session:
-                for url in urls:
-                    content = await self.fetch_url_with_retry(session, url)
-                    if content:
-                        soup = BeautifulSoup(content, 'html.parser')
-                        
-                        # Extract all text content from the page
-                        text_content = self.extract_text_content(soup)
-                        chunks = self.split_text(text_content, self.config['split_length'])
-                        
-                        for i, chunk in enumerate(chunks, 1):
-                            if not chunk:  # Skip empty chunks
-                                continue
-                            content_hash = hashlib.md5(chunk.encode()).hexdigest()
-                            if content_hash not in self.seen_content:
-                                self.seen_content.add(content_hash)
-                                row = {
-                                    'URL': url,
-                                    'Content': chunk,
-                                    'Chunk Number': i
-                                }
-                                writer.writerow(row)
-                        
-                        logging.info(f"Processed URL: {url}")
-                    else:
-                        logging.error(f"Failed to fetch content from {url}")
-                        
-                    await asyncio.sleep(self.config['delay_between_requests'])
-
-        logging.info(f"All unique data saved to {csv_filename}")
-
-def run_scraper(config: dict):
+        def run_scraper(config: dict):
     """Run the web scraper with the given configuration."""
     scraper = WebScraper(config)
     asyncio.run(scraper.run())
