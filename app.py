@@ -21,7 +21,7 @@ def async_route(f):
 async def scrape():
     config = request.json
     scraper = WebScraper(config)
-    results = await scraper.run()
+    results = await scraper.scan_website(config['domain'])
     return jsonify(results)
 
 if __name__ == '__main__':
