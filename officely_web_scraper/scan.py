@@ -9,6 +9,12 @@ import random
 from typing import Set, Optional
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
+from aiohttp import TCPConnector, ClientSession
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 class WebScraper:
     USER_AGENTS = [
@@ -24,65 +30,109 @@ class WebScraper:
         self.seen_content: Set[str] = set()
         self.results = []
 
+    @staticmethod
+    def get_random_user_agent() -> str:
+        return random.choice(WebScraper.USER_AGENTS)
+
+    async def fetch_url_with_retry(self, session: ClientSession, url: str) -> Optional[str]:
+        for attempt in range(self.config['max_retries']):
+            try:
+                headers = {'User-Agent': self.get_random_user_agent()}
+                async with session.get(url, headers=headers, timeout=30) as response:
+                    if response.status == 429:
+                        retry_after = int(response.headers.get('Retry-After', self.config['base_delay']))
+                        logging.warning(f"Rate limited. Waiting for {retry_after} seconds before retrying...")
+                        await asyncio.sleep(retry_after)
+                        continue
+                    
+                    response.raise_for_status()
+                    content = await response.read()
+                    encoding = response.charset or chardet.detect(content)['encoding']
+                    return content.decode(encoding, errors='replace')
+                    
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                logging.error(f"Attempt {attempt + 1} failed for {url}: {e}")
+                if attempt + 1 < self.config['max_retries']:
+                    wait_time = self.config['base_delay'] * (2 ** attempt)
+                    logging.info(f"Waiting {wait_time} seconds before retrying...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logging.error(f"Failed to fetch {url} after {self.config['max_retries']} attempts.")
+                    return None
+            except Exception as e:
+                logging.error(f"Unexpected error for {url}: {e}")
+                return None
+
+    def should_follow_url(self, url: str) -> bool:
+        if self.config.get('start_with') and not url.startswith(self.config['start_with']):
+            return False
+        
+        if self.config.get('exclude_keywords') and any(keyword in url for keyword in self.config['exclude_keywords']):
+            return False
+        
+        if self.config.get('include_keywords') and not any(keyword in url for keyword in self.config['include_keywords']):
+            return False
+        
+        parsed_url = urlparse(url)
+        if any(url.startswith(protocol) for protocol in self.config.get('excluded_protocols', [])):
+            return False
+            
+        domain_name = urlparse(self.config['domain']).netloc
+        if domain_name not in parsed_url.netloc:
+            return False
+        
+        return True
+
+    def extract_text_content(self, soup: BeautifulSoup) -> str:
+        for script in soup(["script", "style"]):
+            script.decompose()
+        text = soup.get_text(separator=' ', strip=True)
+        return ' '.join(text.split())
+
     async def scan_website(self, url: str):
-        connector = aiohttp.TCPConnector(limit_per_host=self.config.get('connections_per_host', 5))
-        async with aiohttp.ClientSession(connector=connector) as session:
-            await self._scan_page(session, url, depth=0)
+        connector = TCPConnector(limit_per_host=self.config.get('connections_per_host', 5))
+        async with ClientSession(connector=connector) as session:
+            semaphore = asyncio.Semaphore(self.config.get('concurrent_requests', 10))
+            await self._process_url(session, url, 0, semaphore)
         return self.results
 
-    async def _scan_page(self, session: aiohttp.ClientSession, url: str, depth: int):
-        if url in self.visited or depth > self.config.get('max_depth', 3):
+    async def _process_url(self, session: ClientSession, url: str, depth: int, semaphore: asyncio.Semaphore):
+        if depth > self.config.get('max_depth', 3) or url in self.visited:
             return
 
         self.visited.add(url)
-        try:
-            headers = {'User-Agent': random.choice(self.USER_AGENTS)}
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    content = await response.text()
-                    soup = BeautifulSoup(content, 'html.parser')
-                    
-                    page_data = {
-                        "url": url,
-                        "content": self._extract_content(soup)
-                    }
-                    
-                    if page_data["content"]:
-                        self.results.append(page_data)
-                    
-                    # Process links
-                    links = soup.find_all('a', href=True)
-                    tasks = []
-                    for link in links:
-                        next_url = urljoin(url, link['href'])
-                        if next_url.startswith(self.config['domain']):
-                            tasks.append(self._scan_page(session, next_url, depth + 1))
-                    
-                    if tasks:
-                        await asyncio.gather(*tasks)
-                        
-        except Exception as e:
-            logging.error(f"Error scanning {url}: {e}")
-
-    def _extract_content(self, soup: BeautifulSoup) -> dict:
-        content = {}
         
-        # Extract main content
-        main_content = soup.find('main') or soup.find('article') or soup.find('div', class_='content')
-        if main_content:
-            content["main"] = {
-                "title": "Main Content",
-                "text": main_content.get_text(strip=True)
-            }
+        async with semaphore:
+            content = await self.fetch_url_with_retry(session, url)
             
-        # Extract target divs if specified
-        if self.config.get("target_divs"):
-            for div_key, div_info in self.config["target_divs"].items():
-                element = soup.select_one(div_info["selector"])
-                if element:
-                    content[div_key] = {
-                        "title": div_info["title"],
-                        "text": element.get_text(strip=True)
-                    }
-                    
-        return content
+        if content:
+            soup = BeautifulSoup(content, 'html.parser')
+            text_content = self.extract_text_content(soup)
+            
+            if text_content:
+                content_hash = hashlib.md5(text_content.encode()).hexdigest()
+                if content_hash not in self.seen_content:
+                    self.seen_content.add(content_hash)
+                    self.results.append({
+                        "url": url,
+                        "content": {
+                            "main": {
+                                "title": soup.title.string if soup.title else "No Title",
+                                "text": text_content
+                            }
+                        }
+                    })
+            
+            tasks = []
+            for link in soup.find_all('a', href=True):
+                next_url = urljoin(url, link['href'])
+                if self.should_follow_url(next_url):
+                    tasks.append(self._process_url(session, next_url, depth + 1, semaphore))
+            
+            if tasks:
+                await asyncio.gather(*tasks)
+                await asyncio.sleep(self.config.get('delay_between_requests', 0.5))
+
+def run_scraper(config: dict):
+    scraper = WebScraper(config)
+    asyncio.run(scraper.run())
