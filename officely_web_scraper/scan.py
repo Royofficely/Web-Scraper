@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from aiohttp import TCPConnector, ClientSession
 
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s'
@@ -28,7 +29,6 @@ class WebScraper:
         self.config = config
         self.visited: Set[str] = set()
         self.seen_content: Set[str] = set()
-        self.results = []
 
     @staticmethod
     def get_random_user_agent() -> str:
@@ -67,14 +67,14 @@ class WebScraper:
         if self.config.get('start_with') and not url.startswith(self.config['start_with']):
             return False
         
-        if self.config.get('exclude_keywords') and any(keyword in url for keyword in self.config['exclude_keywords']):
+        if self.config['exclude_keywords'] and any(keyword in url for keyword in self.config['exclude_keywords']):
             return False
         
-        if self.config.get('include_keywords') and not any(keyword in url for keyword in self.config['include_keywords']):
+        if self.config['include_keywords'] and not any(keyword in url for keyword in self.config['include_keywords']):
             return False
         
         parsed_url = urlparse(url)
-        if any(url.startswith(protocol) for protocol in self.config.get('excluded_protocols', [])):
+        if any(url.startswith(protocol) for protocol in self.config['excluded_protocols']):
             return False
             
         domain_name = urlparse(self.config['domain']).netloc
@@ -84,82 +84,129 @@ class WebScraper:
         return True
 
     def extract_text_content(self, soup: BeautifulSoup) -> str:
+        # Remove script and style elements
         for script in soup(["script", "style"]):
             script.decompose()
+            
+        # Get text content
         text = soup.get_text(separator=' ', strip=True)
+        # Normalize whitespace
         return ' '.join(text.split())
-    async def scan_website(self, url: str):
-        """API endpoint method that returns results in JSON format"""
-        connector = TCPConnector(limit_per_host=self.config['connections_per_host'])
-        async with ClientSession(connector=connector) as session:
-            semaphore = asyncio.Semaphore(self.config['concurrent_requests'])
-            to_visit = {url}
-            results = []
-        
-            while to_visit:
-                current_url = to_visit.pop()
-                if current_url in self.visited:
-                    continue
-                
-                self.visited.add(current_url)
-                content = await self.fetch_url_with_retry(session, current_url)
-            
-                if content:
-                    soup = BeautifulSoup(content, 'html.parser')
-                    text_content = self.extract_text_content(soup)
-                
-                    if text_content:
-                        results.append({
-                            "url": current_url,
-                            "content": text_content
-                        })
-                
-                    # Find new URLs to visit
-                    for link in soup.find_all('a', href=True):
-                        next_url = urljoin(current_url, link['href'])
-                        if self.should_follow_url(next_url) and next_url not in self.visited:
-                            to_visit.add(next_url)
-            
-                await asyncio.sleep(self.config['delay_between_requests'])
-    
-        return results
-    async def _process_url(self, session: ClientSession, url: str, depth: int, semaphore: asyncio.Semaphore):
-        if depth > self.config.get('max_depth', 3) or url in self.visited:
-            return
 
+    async def process_url(self, session: ClientSession, url: str, depth: int, max_depth: int, 
+                         semaphore: asyncio.Semaphore) -> Set[str]:
+        if depth > max_depth or url in self.visited:
+            return set()
+        
         self.visited.add(url)
         
         async with semaphore:
             content = await self.fetch_url_with_retry(session, url)
+        
+        if content is None:
+            return set()
             
-        if content:
-            soup = BeautifulSoup(content, 'html.parser')
-            text_content = self.extract_text_content(soup)
+        soup = BeautifulSoup(content, 'html.parser')
+        found_urls = set()
+        
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            full_url = urljoin(url, href.strip())
+            if self.should_follow_url(full_url):
+                found_urls.add(full_url)
+                
+        return found_urls
+
+    async def get_all_pages(self) -> Set[str]:
+        connector = TCPConnector(limit_per_host=self.config['connections_per_host'])
+        async with ClientSession(connector=connector) as session:
+            to_visit = {self.config['domain']}
+            all_urls = set()
+            max_depth = self.config['max_depth'] if self.config['max_depth'] is not None else float('inf')
+            semaphore = asyncio.Semaphore(self.config['concurrent_requests'])
             
-            if text_content:
-                content_hash = hashlib.md5(text_content.encode()).hexdigest()
-                if content_hash not in self.seen_content:
-                    self.seen_content.add(content_hash)
-                    self.results.append({
-                        "url": url,
-                        "content": {
-                            "main": {
-                                "title": soup.title.string if soup.title else "No Title",
-                                "text": text_content
-                            }
-                        }
-                    })
-            
-            tasks = []
-            for link in soup.find_all('a', href=True):
-                next_url = urljoin(url, link['href'])
-                if self.should_follow_url(next_url):
-                    tasks.append(self._process_url(session, next_url, depth + 1, semaphore))
-            
-            if tasks:
-                await asyncio.gather(*tasks)
-                await asyncio.sleep(self.config.get('delay_between_requests', 0.5))
+            for depth in range(int(max_depth) + 1):
+                if not to_visit:
+                    break
+                    
+                tasks = [
+                    self.process_url(session, url, depth, max_depth, semaphore) 
+                    for url in to_visit
+                ]
+                results = await asyncio.gather(*tasks)
+                
+                to_visit = set()
+                for result in results:
+                    all_urls.update(result)
+                    to_visit.update(result - self.visited)
+                    
+                await asyncio.sleep(self.config['delay_between_requests'])
+                
+            return all_urls
+
+    @staticmethod
+    def split_text(text: str, max_length: Optional[int]) -> list[str]:
+        if not max_length:
+            return [text] if text else []
+        return [text[i:i+max_length] for i in range(0, len(text), max_length)] if text else []
+
+    async def run(self):
+        logging.info(f"Starting scraper with domain: {self.config['domain']}")
+        
+        # Create output directory
+        domain_name = urlparse(self.config['domain']).netloc
+        directory_path = os.path.join(os.getcwd(), domain_name)
+        os.makedirs(directory_path, exist_ok=True)
+        
+        csv_filename = os.path.join(directory_path, 'scraped_data.csv')
+        
+        # Get all URLs to scrape
+        urls = await self.get_all_pages()
+        logging.info(f"Found {len(urls)} URLs to scrape")
+        
+        if not urls:
+            logging.warning("No URLs found to scrape. Check your domain and keyword settings.")
+            return
+
+        # Define fieldnames based on whether target_divs is specified
+        fieldnames = ['URL', 'Content', 'Chunk Number']
+        
+        with open(csv_filename, 'w', newline='', encoding='utf-8-sig') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+
+            async with ClientSession() as session:
+                for url in urls:
+                    content = await self.fetch_url_with_retry(session, url)
+                    if content:
+                        soup = BeautifulSoup(content, 'html.parser')
+                        
+                        # Extract all text content from the page
+                        text_content = self.extract_text_content(soup)
+                        chunks = self.split_text(text_content, self.config['split_length'])
+                        
+                        for i, chunk in enumerate(chunks, 1):
+                            if not chunk:  # Skip empty chunks
+                                continue
+                            content_hash = hashlib.md5(chunk.encode()).hexdigest()
+                            if content_hash not in self.seen_content:
+                                self.seen_content.add(content_hash)
+                                row = {
+                                    'URL': url,
+                                    'Content': chunk,
+                                    'Chunk Number': i
+                                }
+                                writer.writerow(row)
+                        
+                        logging.info(f"Processed URL: {url}")
+                    else:
+                        logging.error(f"Failed to fetch content from {url}")
+                        
+                    await asyncio.sleep(self.config['delay_between_requests'])
+
+        logging.info(f"All unique data saved to {csv_filename}")
 
 def run_scraper(config: dict):
+    """Run the web scraper with the given configuration."""
     scraper = WebScraper(config)
-    asyncio.run(scraper.scan_website(config['domain']))
+    asyncio.run(scraper.run())
