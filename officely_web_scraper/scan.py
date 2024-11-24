@@ -162,4 +162,4 @@ class WebScraper:
 
 def run_scraper(config: dict):
     scraper = WebScraper(config)
-    asyncio.run(scraper.run())
+    asyncio.run(scraper.scan_website(config['domain']))
