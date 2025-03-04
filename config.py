@@ -1,0 +1,15 @@
+config = {
+    "domain": "https://support.example.com",
+    "include_keywords": ["example"],
+    "exclude_keywords": None,
+    "max_depth": 3,
+    "target_div": None,
+    "start_with": None,
+    "split_length": 2000,
+    "excluded_protocols": ['whatsapp:', 'tel:', 'mailto:'],
+    "max_retries": 5,
+    "base_delay": 1,
+    "concurrent_requests": 10,
+    "connections_per_host": 5,
+    "delay_between_requests": 0.5,
+}
