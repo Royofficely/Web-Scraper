@@ -1,2 +1,0 @@
-#!/bin/bash
-python -m officely_web_scraper.scan "$@"
