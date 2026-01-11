@@ -38,7 +38,7 @@ Time:   ~3 minutes
 | Feature | Description |
 |---------|-------------|
 | **Async Crawling** | Concurrent requests with `aiohttp` for 10x faster scraping |
-| **Proxy Support** | Built-in support for ScraperAPI, Bright Data, Oxylabs, or custom proxy lists |
+| **Proxy Support (Optional)** | Works without proxy; optionally supports ScraperAPI, Bright Data, Oxylabs, or custom lists |
 | **Circuit Breaker** | Automatically stops when site is blocking requests |
 | **Recursive Discovery** | Follows links up to configurable depth |
 | **Smart Filtering** | Include/exclude URLs by keywords |
@@ -80,7 +80,20 @@ Output saved to `./docs.example.com/scraped_data.csv`
 
 ---
 
-## Proxy Support
+## Proxy Support (Optional)
+
+> **Note:** Proxy is completely optional. The scraper works perfectly with direct connections.
+> Only use a proxy if you need to bypass geo-restrictions, avoid IP blocking on high-volume scraping, or access sites that block datacenter IPs.
+
+### No Proxy (Default)
+
+```python
+config = {
+    "domain": "https://example.com",
+    "max_depth": 3,
+    # No proxy configuration needed - works out of the box
+}
+```
 
 ### ScraperAPI
 
@@ -197,8 +210,8 @@ config = {
     "circuit_breaker_threshold": 10,
     "circuit_breaker_rate": 0.5,
 
-    # Proxy (optional)
-    "proxy": None,                         # See Proxy Support section
+    # Proxy (optional - works fine without it)
+    "proxy": None,                         # Default: no proxy (direct connection)
 }
 ```
 
