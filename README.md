@@ -1,15 +1,15 @@
 <h1 align="center">Web Scraper</h1>
 
 <p align="center">
-  <strong>Fast, async web scraper with recursive crawling and intelligent content extraction.</strong>
+  <strong>Fast, async web scraper with recursive crawling, proxy support, and intelligent content extraction.</strong>
 </p>
 
 <p align="center">
   <a href="#features">Features</a> •
   <a href="#quick-start">Quick Start</a> •
+  <a href="#proxy-support">Proxy Support</a> •
   <a href="#configuration">Configuration</a> •
-  <a href="#usage">Usage</a> •
-  <a href="#output">Output</a>
+  <a href="#circuit-breaker">Circuit Breaker</a>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 
 ## What It Does
 
-Crawl entire websites and extract clean text content into structured CSV files. Built for speed with async I/O and respectful rate limiting.
+Crawl entire websites and extract clean text content into structured CSV files. Built for speed with async I/O, proxy rotation, and automatic failure detection.
 
 ```
 Input:  https://docs.example.com
@@ -38,12 +38,14 @@ Time:   ~3 minutes
 | Feature | Description |
 |---------|-------------|
 | **Async Crawling** | Concurrent requests with `aiohttp` for 10x faster scraping |
+| **Proxy Support** | Built-in support for ScraperAPI, Bright Data, Oxylabs, or custom proxy lists |
+| **Circuit Breaker** | Automatically stops when site is blocking requests |
 | **Recursive Discovery** | Follows links up to configurable depth |
 | **Smart Filtering** | Include/exclude URLs by keywords |
-| **Rate Limiting** | Configurable delays and retry with exponential backoff |
+| **Rate Limiting** | Configurable delays with exponential backoff + jitter |
 | **Content Chunking** | Splits large pages into manageable pieces |
-| **Duplicate Detection** | MD5 hashing prevents duplicate content |
-| **User-Agent Rotation** | Randomized headers to avoid blocks |
+| **Duplicate Detection** | SHA-256 hashing prevents duplicate content |
+| **Security** | SSRF protection, CSV injection prevention, path traversal prevention |
 
 ---
 
@@ -78,6 +80,89 @@ Output saved to `./docs.example.com/scraped_data.csv`
 
 ---
 
+## Proxy Support
+
+### ScraperAPI
+
+```python
+config = {
+    "domain": "https://example.com",
+    "proxy": {
+        "type": "scraperapi",
+        "api_key": "YOUR_API_KEY",
+        "render_js": True,      # Optional: render JavaScript
+        "country": "us",        # Optional: geo-targeting
+    }
+}
+```
+
+### Bright Data
+
+```python
+config = {
+    "domain": "https://example.com",
+    "proxy": {
+        "type": "brightdata",
+        "username": "YOUR_USERNAME",
+        "password": "YOUR_PASSWORD",
+        "zone": "residential",  # or "datacenter"
+        "country": "us",        # Optional
+    }
+}
+```
+
+### Oxylabs
+
+```python
+config = {
+    "domain": "https://example.com",
+    "proxy": {
+        "type": "oxylabs",
+        "username": "YOUR_USERNAME",
+        "password": "YOUR_PASSWORD",
+        "country": "us",        # Optional
+    }
+}
+```
+
+### Custom Proxy List
+
+```python
+config = {
+    "domain": "https://example.com",
+    "proxy": {
+        "type": "list",
+        "proxies": [
+            "http://user:pass@proxy1.example.com:8080",
+            "http://user:pass@proxy2.example.com:8080",
+        ]
+    }
+}
+```
+
+---
+
+## Circuit Breaker
+
+Automatically stops scraping when too many requests fail. Prevents wasting time on sites that are blocking you.
+
+```python
+config = {
+    "domain": "https://example.com",
+    "circuit_breaker_enabled": True,   # Default: True
+    "circuit_breaker_threshold": 10,   # Stop after 10 consecutive failures
+    "circuit_breaker_rate": 0.5,       # Or when 50% of requests fail
+}
+```
+
+**Output when triggered:**
+```
+WARNING - Circuit breaker: OPEN (consecutive failures)
+INFO - Circuit breaker stats: {'state': 'open', 'total_requests': 24, 'total_failures': 6}
+```
+
+---
+
 ## Configuration
 
 All settings in `config.py`:
@@ -85,26 +170,35 @@ All settings in `config.py`:
 ```python
 config = {
     # Target
-    "domain": "https://example.com",      # Starting URL
-    "max_depth": 3,                        # How deep to crawl (None = unlimited)
+    "domain": "https://example.com",
+    "max_depth": 3,                        # None = unlimited
 
     # Filtering
-    "include_keywords": ["blog", "docs"],  # Only URLs containing these
-    "exclude_keywords": ["login", "admin"], # Skip URLs containing these
-    "start_with": None,                    # Only URLs starting with this prefix
+    "include_keywords": ["blog", "docs"],
+    "exclude_keywords": ["login", "admin"],
+    "start_with": None,
 
     # Rate Limiting
-    "concurrent_requests": 10,             # Max parallel requests
-    "connections_per_host": 5,             # Max connections per domain
-    "delay_between_requests": 0.5,         # Seconds between requests
+    "concurrent_requests": 10,
+    "connections_per_host": 5,
+    "delay_between_requests": 0.5,
 
     # Retry Logic
-    "max_retries": 5,                      # Retry failed requests
-    "base_delay": 1,                       # Initial retry delay (doubles each attempt)
+    "max_retries": 5,
+    "base_delay": 1,                       # Doubles each attempt + jitter
+    "timeout": 30,
 
     # Content
-    "split_length": 2000,                  # Chunk size (chars). None = no splitting
+    "split_length": 2000,
     "excluded_protocols": ['mailto:', 'tel:', 'whatsapp:'],
+
+    # Circuit Breaker
+    "circuit_breaker_enabled": True,
+    "circuit_breaker_threshold": 10,
+    "circuit_breaker_rate": 0.5,
+
+    # Proxy (optional)
+    "proxy": None,                         # See Proxy Support section
 }
 ```
 
@@ -112,7 +206,7 @@ config = {
 
 ## Usage
 
-### Basic Crawl
+### Command Line
 
 ```bash
 python scan.py
@@ -121,24 +215,31 @@ python scan.py
 ### As a Module
 
 ```python
-from scan import WebScraper, run_scraper
+from scan import run_scraper
 
 config = {
     "domain": "https://example.com",
     "max_depth": 2,
-    "include_keywords": ["api"],
-    "concurrent_requests": 5,
-    "delay_between_requests": 1,
-    "max_retries": 3,
-    "base_delay": 1,
-    "split_length": 2000,
-    "connections_per_host": 5,
-    "excluded_protocols": ['mailto:', 'tel:'],
-    "exclude_keywords": None,
-    "start_with": None,
 }
 
-run_scraper(config)
+output_file = run_scraper(config)
+print(f"Saved to: {output_file}")
+```
+
+### With Proxy Provider Objects
+
+```python
+from scan import WebScraper, ScraperConfig, ScraperAPI
+import asyncio
+
+config = ScraperConfig(
+    domain="https://example.com",
+    max_depth=2,
+    proxy=ScraperAPI(api_key="YOUR_KEY", render_js=True),
+)
+
+scraper = WebScraper(config)
+output = asyncio.run(scraper.run())
 ```
 
 ---
@@ -151,7 +252,6 @@ Results saved as CSV:
 |-----|---------|--------------|
 | https://example.com/page1 | Clean extracted text... | 1 |
 | https://example.com/page1 | More text from same page... | 2 |
-| https://example.com/page2 | Another page content... | 1 |
 
 **Output location:** `./{domain}/scraped_data.csv`
 
@@ -163,17 +263,26 @@ Results saved as CSV:
 ┌─────────────────────────────────────────────────────────┐
 │  1. Start with domain URL                               │
 ├─────────────────────────────────────────────────────────┤
-│  2. Fetch page (async, with retry + backoff)            │
+│  2. Fetch page (async, retry + backoff, optional proxy) │
 ├─────────────────────────────────────────────────────────┤
-│  3. Extract all links, filter by rules                  │
+│  3. Check circuit breaker (stop if too many failures)   │
 ├─────────────────────────────────────────────────────────┤
-│  4. Add new URLs to queue (respect max_depth)           │
+│  4. Extract links, filter by rules, add to queue        │
 ├─────────────────────────────────────────────────────────┤
-│  5. Extract text content, remove scripts/styles         │
+│  5. Extract text, remove scripts/styles/nav             │
 ├─────────────────────────────────────────────────────────┤
-│  6. Chunk content, dedupe with MD5, save to CSV         │
+│  6. Chunk, dedupe with SHA-256, save to CSV             │
 └─────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Security Features
+
+- **SSRF Protection** — Blocks requests to localhost, private IPs, internal networks
+- **CSV Injection Prevention** — Sanitizes output to prevent formula injection
+- **Path Traversal Prevention** — Validates output directory paths
+- **Input Validation** — Validates all configuration parameters
 
 ---
 
@@ -200,24 +309,15 @@ pip install aiohttp beautifulsoup4 chardet
 
 ---
 
-## Project Structure
-
-```
-Web-Scraper/
-├── scan.py           # Main scraper class
-├── config.py         # Configuration
-├── requirements.txt  # Dependencies
-└── README.md
-```
-
----
-
 ## Tips
 
-- **Getting rate limited?** Increase `delay_between_requests`
-- **Too slow?** Increase `concurrent_requests` (be respectful)
-- **Missing pages?** Increase `max_depth` or check `include_keywords`
-- **Large site?** Use `start_with` to scope to a section
+| Problem | Solution |
+|---------|----------|
+| Getting blocked | Use a proxy service (ScraperAPI, Bright Data) |
+| Rate limited | Increase `delay_between_requests` |
+| Too slow | Increase `concurrent_requests` (be respectful) |
+| Missing pages | Increase `max_depth` or check `include_keywords` |
+| Wasting time on blocked site | Enable circuit breaker (default: on) |
 
 ---
 
