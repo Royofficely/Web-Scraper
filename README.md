@@ -346,6 +346,30 @@ MIT
 
 ---
 
+## AI Prompt
+
+Copy this prompt to quickly set up web scraping with AI assistants:
+
+```
+I need to scrape a website. Use the Web Scraper from https://github.com/Royofficely/Web-Scraper
+
+Here's what I need:
+- Target URL: [YOUR_URL]
+- Max depth: [1-5]
+- Include only pages containing: [KEYWORDS or "all"]
+- Exclude pages containing: [KEYWORDS or "none"]
+
+The scraper should:
+1. Clone the repo and install requirements
+2. Configure config.py with my settings
+3. Run the scraper
+4. Output clean text to CSV
+
+Note: No proxy needed for most sites. Only add proxy config if I'm getting blocked.
+```
+
+---
+
 <p align="center">
   Built by <a href="https://github.com/Royofficely">Roy Nativ</a>
 </p>
